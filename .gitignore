@@ -1,0 +1,31 @@
+# Scala Build
+.scala-build/
+.bsp/
+target/
+project/target/
+project/project/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+temp_*.csv
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Spark
+metastore_db/
+derby.log
+spark-warehouse/
+
+# Large data files and outputs
+raw2/
+processed/
+spark_output/
