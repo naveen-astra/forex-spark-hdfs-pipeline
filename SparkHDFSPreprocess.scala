@@ -1,6 +1,10 @@
 //> using scala "2.12.18"
 //> using dep "org.apache.spark::spark-sql:3.3.0"
 //> using dep "org.apache.hadoop:hadoop-client:3.3.2"
+//> using javaOpt "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+//> using javaOpt "--add-opens=java.base/java.lang=ALL-UNNAMED"
+//> using javaOpt "--add-opens=java.base/java.util=ALL-UNNAMED"
+//> using javaOpt "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED"
 
 import org.apache.spark.sql.{SparkSession, DataFrame}
 import org.apache.spark.sql.functions._
@@ -23,56 +27,54 @@ object SparkHDFSPreprocess {
     import spark.implicits._
     
     println("=" * 70)
-    println("SPARK + HDFS FOREX PREPROCESSING")
+    println("SPARK LOCAL FOREX PREPROCESSING - ALL FILES")
     println("=" * 70)
     
-    val files = List(
-      ("EURUSD", "1d"),
-      ("GBPUSD", "1d"),
-      ("USDCAD", "1d"),
-      ("USDJPY", "1d")
+    // All 15 currency pairs and 3 timeframes (45 files total)
+    val pairs = List(
+      "AUDJPY", "AUDUSD", "EURAUD", "EURCHF", "EURGBP", 
+      "EURJPY", "EURUSD", "GBPAUD", "GBPCAD", "GBPJPY", 
+      "GBPUSD", "NZDUSD", "USDCAD", "USDCHF", "USDJPY"
     )
+    val timeframes = List("1d", "1h", "1min")
     
-    val containerId = "4b1572a73e7b33e5355cff51616b584a2d3e7450eb9f927f512c84279f02324e"
+    val files = for {
+      pair <- pairs
+      tf <- timeframes
+    } yield (pair, tf)
+    
+    println(s"Processing ${files.length} files (${pairs.length} pairs × ${timeframes.length} timeframes)")
+    new java.io.File("spark_output").mkdirs()
+    
+    val startTime = System.currentTimeMillis()
     
     files.zipWithIndex.foreach { case ((pair, tf), idx) =>
-      println(s"\n[${idx+1}/4] Processing $pair $tf with Spark...")
+      println(s"\n[${idx+1}/${files.length}] Processing $pair $tf...")
       
-      val hdfsPath = s"/forex/raw/${tf}/${pair}_${tf}_2017-01-01_2024-12-31.csv"
-      val localFile = s"temp_spark_${pair}_${tf}.csv"
-      val processedLocal = s"spark_output/${pair}_${tf}_processed"
-      val hdfsOutput = s"/forex_new/spark_processed/${tf}/${pair}_${tf}"
+      val inputPath = s"raw2/${pair}_${tf}_2017-01-01_2024-12-31.csv"
+      val outputPath = s"spark_output/${pair}_${tf}_processed.csv"
       
       try {
-        // Download from HDFS using Docker
-        print("  Fetching from HDFS...")
-        import scala.sys.process._
-        s"docker exec $containerId hdfs dfs -cat $hdfsPath".#>(new java.io.File(localFile)).!
-        println(" ✓")
-        
-        // Read local file with Spark (explicit file:// protocol)
-        print("  Reading with Spark...")
-        val absPath = new java.io.File(localFile).getAbsolutePath.replace("\\", "/")
+        // Read directly from raw2/ with Spark
+        print("  Reading...")
+        val absPath = new java.io.File(inputPath).getAbsolutePath.replace("\\", "/")
         val df = spark.read
           .option("header", "true")
           .option("inferSchema", "true")
           .csv(s"file:///$absPath")
-        println(s" ✓ (${df.count()} records)")
+        val recordCount = df.count()
+        println(s" ✓ (${recordCount} records)")
         
         // Preprocess with Spark transformations
-        print("  Applying Spark transformations...")
-        val processed = preprocessWithSpark(df, pair, tf).cache() // Cache to persist in memory
+        print("  Transforming...")
+        val processed = preprocessWithSpark(df, pair, tf).cache()
         println(" ✓")
         
-        // Show statistics using Spark aggregations (before collecting)
-        showSparkStats(processed, pair, tf)
-        
-        // Collect results and write manually (avoid Hadoop binaries issue)
-        print("  Saving as CSV...")
-        new java.io.File("spark_output").mkdirs()
+        // Write output - collect and write manually for better control
+        print("  Writing CSV...")
         val results = processed.collect()
         
-        val csvFile = new java.io.PrintWriter(s"$processedLocal.csv")
+        val csvFile = new java.io.PrintWriter(outputPath)
         csvFile.println(processed.columns.mkString(","))
         results.foreach { row =>
           csvFile.println(row.mkString(","))
@@ -80,21 +82,7 @@ object SparkHDFSPreprocess {
         csvFile.close()
         println(" ✓")
         
-        // Upload CSV to HDFS
-        print("  Uploading to HDFS...")
-        s"docker exec $containerId hdfs dfs -mkdir -p $hdfsOutput".!
-        s"docker exec $containerId hdfs dfs -put -f $processedLocal.csv $hdfsOutput/data.csv".!
-        println(" ✓")
-        
         processed.unpersist() // Release cache
-        
-        // Show sample data
-        println("\n  Sample (last 3 rows):")
-        val sampleDf = spark.read.option("header", "true").option("inferSchema", "true")
-          .csv(s"$processedLocal.csv")
-        sampleDf.orderBy(desc("Date"))
-          .select("Date", "Close", "ChangePct", "MA5", "MA20", "Volatility5")
-          .show(3, truncate = false)
           
       } catch {
         case e: Exception =>
@@ -102,10 +90,14 @@ object SparkHDFSPreprocess {
       }
     }
     
+    val endTime = System.currentTimeMillis()
+    val duration = (endTime - startTime) / 1000.0
+    
     println("\n" + "=" * 70)
     println("✓ SPARK PROCESSING COMPLETE")
-    println("Output: hdfs://localhost:9870/forex_new/spark_processed/")
-    println("Format: Parquet (efficient columnar storage)")
+    println(s"Processed: ${files.length} files in ${duration}s (avg: ${duration/files.length}s per file)")
+    println("Output: spark_output/ directory")
+    println("Format: CSV with technical indicators (MA5, MA20, Volatility, etc.)")
     println("=" * 70)
     
     spark.stop()
