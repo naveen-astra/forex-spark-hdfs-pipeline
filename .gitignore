@@ -5,9 +5,10 @@ target/
 project/target/
 project/project/
 
-# IDE
+# IDE and Language Server
 .idea/
 .vscode/
+.metals/
 *.swp
 *.swo
 *~
@@ -29,3 +30,7 @@ spark-warehouse/
 raw2/
 processed/
 spark_output/
+ml_output/
+
+# Generated/exported files
+*.pdf
