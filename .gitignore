@@ -31,6 +31,7 @@ raw2/
 processed/
 spark_output/
 ml_output/
+streaming_output/
 
 # Generated/exported files
 *.pdf
