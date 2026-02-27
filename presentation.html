@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forex Spark Pipeline</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--surface:#111;--card:#161616;--border:#222;--text:#e5e5e5;--dim:#777;--accent:#fff;--green:#22c55e;--red:#ef4444;--blue:#3b82f6;--amber:#f59e0b}
+html{scroll-behavior:smooth;font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;overflow-x:hidden}
+::selection{background:#fff;color:#000}
+a{color:inherit;text-decoration:none}
+
+/* NAV */
+nav{position:fixed;top:0;width:100%;z-index:100;backdrop-filter:blur(20px);background:rgba(10,10,10,.8);border-bottom:1px solid var(--border)}
+.nav-inner{max-width:1200px;margin:0 auto;padding:0 2rem;height:56px;display:flex;align-items:center;justify-content:space-between}
+.nav-brand{font-weight:700;font-size:1.1rem;letter-spacing:-.02em}
+.nav-links{display:flex;gap:2rem;font-size:.85rem;color:var(--dim)}
+.nav-links a:hover{color:#fff}
+
+/* HERO */
+.hero{min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem 4rem;position:relative}
+.hero::before{content:'';position:absolute;top:50%;left:50%;width:600px;height:600px;background:radial-gradient(circle,rgba(255,255,255,.03),transparent 70%);transform:translate(-50%,-50%);pointer-events:none}
+.hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:700;letter-spacing:-.04em;line-height:1.1;margin-bottom:1.5rem}
+.hero h1 span{background:linear-gradient(135deg,#fff 0%,#666 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{font-size:1.15rem;color:var(--dim);max-width:600px;margin:0 auto 2rem}
+.tag-row{display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap}
+.tag{padding:.35rem .9rem;border:1px solid var(--border);border-radius:999px;font-size:.8rem;color:var(--dim)}
+
+/* SECTIONS */
+section{padding:6rem 2rem}
+.container{max-width:1100px;margin:0 auto}
+.section-label{font-size:.75rem;text-transform:uppercase;letter-spacing:.15em;color:var(--dim);margin-bottom:.75rem}
+.section-title{font-size:clamp(1.8rem,3.5vw,2.8rem);font-weight:700;letter-spacing:-.03em;margin-bottom:1rem}
+.section-desc{color:var(--dim);max-width:640px;margin-bottom:3rem;font-size:1rem}
+
+/* STAT GRID */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:3rem}
+.stat-card{background:var(--card);padding:2rem}
+.stat-value{font-size:2rem;font-weight:700;letter-spacing:-.03em;margin-bottom:.25rem}
+.stat-label{font-size:.8rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+.stat-value.green{color:var(--green)}.stat-value.red{color:var(--red)}.stat-value.blue{color:var(--blue)}.stat-value.amber{color:var(--amber)}
+
+/* ARCH */
+.arch-flow{display:flex;align-items:center;justify-content:center;gap:0;flex-wrap:wrap;margin:3rem 0}
+.arch-node{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.25rem 1.5rem;text-align:center;min-width:140px}
+.arch-node h4{font-size:.9rem;font-weight:600;margin-bottom:.25rem}
+.arch-node p{font-size:.75rem;color:var(--dim)}
+.arch-arrow{font-size:1.5rem;color:var(--border);padding:0 .5rem}
+
+/* CODE BLOCK */
+.code-block{background:#0d0d0d;border:1px solid var(--border);border-radius:10px;padding:1.5rem;overflow-x:auto;font-family:'SF Mono','Fira Code',monospace;font-size:.82rem;line-height:1.7;color:#ccc;margin-bottom:2rem;white-space:pre}
+.code-block .kw{color:#c678dd}.code-block .fn{color:#61afef}.code-block .str{color:#98c379}.code-block .num{color:#d19a66}.code-block .cm{color:#555}
+
+/* TABLE */
+.data-table{width:100%;border-collapse:collapse;margin-bottom:2rem}
+.data-table th,.data-table td{padding:.85rem 1rem;text-align:left;border-bottom:1px solid var(--border);font-size:.88rem}
+.data-table th{color:var(--dim);font-weight:500;font-size:.78rem;text-transform:uppercase;letter-spacing:.06em}
+.data-table tr:hover td{background:rgba(255,255,255,.02)}
+.badge{display:inline-block;padding:.2rem .6rem;border-radius:4px;font-size:.75rem;font-weight:600}
+.badge-green{background:rgba(34,197,94,.15);color:var(--green)}
+.badge-red{background:rgba(239,68,68,.15);color:var(--red)}
+.badge-amber{background:rgba(245,158,11,.15);color:var(--amber)}
+.badge-blue{background:rgba(59,130,246,.15);color:var(--blue)}
+
+/* CARDS */
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem;margin-bottom:2rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:2rem;transition:border-color .2s}
+.card:hover{border-color:#333}
+.card h3{font-size:1.1rem;font-weight:600;margin-bottom:.5rem}
+.card p{font-size:.88rem;color:var(--dim);margin-bottom:1rem}
+.card .metric{font-size:1.8rem;font-weight:700;letter-spacing:-.02em}
+
+/* MODEL DETAIL */
+.model-section{border:1px solid var(--border);border-radius:12px;padding:2.5rem;margin-bottom:2rem;background:var(--card)}
+.model-section h3{font-size:1.3rem;font-weight:700;margin-bottom:.5rem}
+.model-section .subtitle{color:var(--dim);font-size:.9rem;margin-bottom:1.5rem}
+.metrics-row{display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1.5rem}
+.metric-item{min-width:120px}
+.metric-item .val{font-size:1.6rem;font-weight:700;letter-spacing:-.02em}
+.metric-item .lbl{font-size:.75rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+
+/* PIPELINE VIZ */
+.pipeline-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:2rem 0}
+.pipeline-step{background:var(--card);padding:1.5rem}
+.step-num{font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem}
+.step-title{font-size:1rem;font-weight:600;margin-bottom:.5rem}
+.step-detail{font-size:.82rem;color:var(--dim)}
+
+/* DIVIDER */
+.divider{border:none;border-top:1px solid var(--border);margin:0}
+
+/* FOOTER */
+footer{padding:4rem 2rem;text-align:center;color:var(--dim);font-size:.82rem;border-top:1px solid var(--border)}
+
+/* SLIDE CONTROLS */
+.slide-nav{position:fixed;right:2rem;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:.5rem;z-index:50}
+.slide-dot{width:8px;height:8px;border-radius:50%;background:var(--border);transition:all .3s}
+.slide-dot.active{background:#fff;box-shadow:0 0 8px rgba(255,255,255,.3)}
+
+@media(max-width:768px){
+  .nav-links{display:none}
+  .arch-flow{flex-direction:column}
+  .arch-arrow{transform:rotate(90deg)}
+  .metrics-row{flex-direction:column;gap:1rem}
+  .slide-nav{display:none}
+  section{padding:4rem 1.25rem}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <div class="nav-brand">forex/spark</div>
+    <div class="nav-links">
+      <a href="#overview">Overview</a>
+      <a href="#data">Data</a>
+      <a href="#preprocessing">Pipeline</a>
+      <a href="#models">Models</a>
+      <a href="#streaming">Streaming</a>
+      <a href="#arch">Architecture</a>
+    </div>
+  </div>
+</nav>
+
+<div class="slide-nav">
+  <a class="slide-dot active" href="#hero"></a>
+  <a class="slide-dot" href="#overview"></a>
+  <a class="slide-dot" href="#data"></a>
+  <a class="slide-dot" href="#preprocessing"></a>
+  <a class="slide-dot" href="#models"></a>
+  <a class="slide-dot" href="#streaming"></a>
+  <a class="slide-dot" href="#arch"></a>
+</div>
+
+<!-- HERO -->
+<section class="hero" id="hero">
+  <div>
+    <h1><span>Distributed Forex Pipeline</span></h1>
+    <p>Batch preprocessing, ML prediction, and real-time streaming on 15 currency pairs using Apache Spark, Kafka, and Scala.</p>
+    <div class="tag-row">
+      <span class="tag">Spark 3.5.1</span>
+      <span class="tag">Kafka 3.6.1 KRaft</span>
+      <span class="tag">Scala 2.12</span>
+      <span class="tag">Spark MLlib</span>
+      <span class="tag">Structured Streaming</span>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- OVERVIEW -->
+<section id="overview">
+  <div class="container">
+    <div class="section-label">Overview</div>
+    <h2 class="section-title">What this project does</h2>
+    <p class="section-desc">End-to-end big data pipeline that ingests 4.4 GB of raw forex data, engineers features with Spark, trains ML models for price prediction, and streams live trading signals via Kafka.</p>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-value">15</div>
+        <div class="stat-label">Currency Pairs</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">4.4 GB</div>
+        <div class="stat-label">Raw Data</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">10.8 GB</div>
+        <div class="stat-label">Processed Output</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">45</div>
+        <div class="stat-label">Files Processed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">8 yrs</div>
+        <div class="stat-label">Data Coverage</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">3</div>
+        <div class="stat-label">Timeframes</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value green">0.987</div>
+        <div class="stat-label">Best R² Score</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value blue">3</div>
+        <div class="stat-label">ML Models</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- DATA -->
+<section id="data">
+  <div class="container">
+    <div class="section-label">Dataset</div>
+    <h2 class="section-title">Multi-timeframe forex data</h2>
+    <p class="section-desc">15 major and cross currency pairs across daily, hourly, and minute timeframes. January 2017 – December 2024.</p>
+
+    <table class="data-table">
+      <thead>
+        <tr><th>Category</th><th>Pairs</th><th>Timeframes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Majors</td><td>EURUSD, GBPUSD, USDJPY, USDCAD, USDCHF, NZDUSD, AUDUSD</td><td>1d, 1h, 1min</td></tr>
+        <tr><td>Crosses</td><td>EURJPY, EURGBP, EURCHF, EURAUD, GBPJPY, GBPAUD, GBPCAD, AUDJPY</td><td>1d, 1h, 1min</td></tr>
+      </tbody>
+    </table>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-value">2,922</div>
+        <div class="stat-label">Records / Daily File</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">43,830</div>
+        <div class="stat-label">Total Daily Records</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">2.52×</div>
+        <div class="stat-label">Size Expansion</div>
+      </div>
+    </div>
+
+    <h3 style="font-size:1rem;margin-bottom:1rem;font-weight:600">Raw columns</h3>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:2rem">
+      <span class="tag">Date</span><span class="tag">Open</span><span class="tag">High</span><span class="tag">Low</span><span class="tag">Close</span><span class="tag">Volume</span>
+    </div>
+    <h3 style="font-size:1rem;margin-bottom:1rem;font-weight:600">Engineered features</h3>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <span class="tag">Range</span><span class="tag">Change</span><span class="tag">ChangePct</span><span class="tag">MA5</span><span class="tag">MA20</span><span class="tag">Volatility5</span><span class="tag">Gain</span><span class="tag">Loss</span>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- PREPROCESSING -->
+<section id="preprocessing">
+  <div class="container">
+    <div class="section-label">Batch Pipeline</div>
+    <h2 class="section-title">Spark preprocessing</h2>
+    <p class="section-desc">SparkHDFSPreprocess.scala reads 45 raw CSVs, applies window functions for moving averages and volatility, then writes enriched output to spark_output/.</p>
+
+    <div class="pipeline-steps">
+      <div class="pipeline-step">
+        <div class="step-num">Step 01</div>
+        <div class="step-title">Ingest</div>
+        <div class="step-detail">Read CSV from raw2/ with schema inference. 15 pairs × 3 timeframes.</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">Step 02</div>
+        <div class="step-title">Window Functions</div>
+        <div class="step-detail">MA5, MA20 via <code>avg().over(Window)</code>. Volatility5 via rolling stddev.</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">Step 03</div>
+        <div class="step-title">Derived Columns</div>
+        <div class="step-detail">Range, Change, ChangePct, Gain, Loss for RSI components.</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">Step 04</div>
+        <div class="step-title">Output</div>
+        <div class="step-detail">Write to spark_output/ as CSV. 10.8 GB total after feature expansion.</div>
+      </div>
+    </div>
+
+    <h3 style="font-size:1rem;margin:2rem 0 1rem;font-weight:600">Key Spark operations</h3>
+    <div class="code-block"><span class="cm">// Window functions for distributed moving average</span>
+<span class="kw">val</span> window5 = Window.<span class="fn">orderBy</span>(<span class="str">"Date"</span>).<span class="fn">rowsBetween</span>(-<span class="num">4</span>, <span class="num">0</span>)
+<span class="kw">val</span> window20 = Window.<span class="fn">orderBy</span>(<span class="str">"Date"</span>).<span class="fn">rowsBetween</span>(-<span class="num">19</span>, <span class="num">0</span>)
+
+df.<span class="fn">withColumn</span>(<span class="str">"MA5"</span>, <span class="fn">avg</span>(<span class="str">"Close"</span>).<span class="fn">over</span>(window5))
+  .<span class="fn">withColumn</span>(<span class="str">"MA20"</span>, <span class="fn">avg</span>(<span class="str">"Close"</span>).<span class="fn">over</span>(window20))
+  .<span class="fn">withColumn</span>(<span class="str">"Volatility5"</span>, <span class="fn">stddev</span>(<span class="str">"Close"</span>).<span class="fn">over</span>(window5))
+  .<span class="fn">withColumn</span>(<span class="str">"Gain"</span>, <span class="fn">when</span>(col(<span class="str">"Change"</span>) > <span class="num">0</span>, col(<span class="str">"Change"</span>)).<span class="fn">otherwise</span>(<span class="num">0</span>))</div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-value">local[*]</div>
+        <div class="stat-label">Spark Mode</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">4 GB</div>
+        <div class="stat-label">Driver Memory</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">AQE</div>
+        <div class="stat-label">Optimization</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">DataFrame</div>
+        <div class="stat-label">API Used</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- MODELS -->
+<section id="models">
+  <div class="container">
+    <div class="section-label">Machine Learning</div>
+    <h2 class="section-title">Spark MLlib models</h2>
+    <p class="section-desc">Three models trained on 43,770 records — two regressors for next-day close price prediction and one classifier for trading signal generation.</p>
+
+    <div class="stat-grid" style="margin-bottom:3rem">
+      <div class="stat-card">
+        <div class="stat-value">19</div>
+        <div class="stat-label">Input Features</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">80/20</div>
+        <div class="stat-label">Train/Test Split</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">43,770</div>
+        <div class="stat-label">Clean Records</div>
+      </div>
+    </div>
+
+    <h3 style="font-size:1rem;margin-bottom:1rem;font-weight:600">Feature vector</h3>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:2.5rem">
+      <span class="tag">Open</span><span class="tag">High</span><span class="tag">Low</span><span class="tag">Close</span><span class="tag">Volume</span>
+      <span class="tag">Range</span><span class="tag">Change</span><span class="tag">ChangePct</span><span class="tag">MA5</span><span class="tag">MA20</span>
+      <span class="tag">Volatility5</span><span class="tag">Gain</span><span class="tag">Loss</span>
+      <span class="tag">Close_lag1</span><span class="tag">Close_lag2</span><span class="tag">Close_lag3</span>
+      <span class="tag">Change_lag1</span><span class="tag">Change_lag2</span><span class="tag">MA5/MA20 Ratio</span>
+    </div>
+
+    <!-- RF -->
+    <div class="model-section">
+      <h3>Random Forest Regressor</h3>
+      <div class="subtitle">Next-day close price prediction — 100 trees, maxDepth=10</div>
+      <div class="metrics-row">
+        <div class="metric-item"><div class="val green">0.987</div><div class="lbl">R² Score</div></div>
+        <div class="metric-item"><div class="val">6.399</div><div class="lbl">RMSE</div></div>
+        <div class="metric-item"><div class="val">2.013</div><div class="lbl">MAE</div></div>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>Rank</th><th>Feature</th><th>Importance</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>High</td><td><span class="badge badge-green">18.56%</span></td></tr>
+          <tr><td>2</td><td>Open</td><td><span class="badge badge-blue">12.25%</span></td></tr>
+          <tr><td>3</td><td>Close_lag3</td><td><span class="badge badge-blue">12.10%</span></td></tr>
+          <tr><td>4</td><td>Close_lag1</td><td><span class="badge badge-blue">11.76%</span></td></tr>
+          <tr><td>5</td><td>MA5</td><td><span class="badge badge-amber">8.14%</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- GBT -->
+    <div class="model-section">
+      <h3>Gradient Boosted Trees Regressor</h3>
+      <div class="subtitle">Next-day close price prediction — 100 iterations, stepSize=0.05, maxDepth=5</div>
+      <div class="metrics-row">
+        <div class="metric-item"><div class="val green">0.982</div><div class="lbl">R² Score</div></div>
+        <div class="metric-item"><div class="val">7.493</div><div class="lbl">RMSE</div></div>
+        <div class="metric-item"><div class="val">1.876</div><div class="lbl">MAE</div></div>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>Rank</th><th>Feature</th><th>Importance</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>High</td><td><span class="badge badge-red">96.20%</span></td></tr>
+          <tr><td>2</td><td>MA5</td><td><span class="badge badge-amber">1.28%</span></td></tr>
+          <tr><td>3</td><td>Volatility5</td><td><span class="badge badge-amber">0.57%</span></td></tr>
+          <tr><td>4</td><td>Low</td><td><span class="badge badge-amber">0.44%</span></td></tr>
+          <tr><td>5</td><td>Close</td><td><span class="badge badge-amber">0.42%</span></td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:.82rem;color:var(--dim);margin-top:.5rem">GBT converged heavily on <code>High</code> — feature dominance suggests near-trivial prediction. Lower MAE than RF but higher variance in outliers.</p>
+    </div>
+
+    <!-- LR -->
+    <div class="model-section">
+      <h3>Logistic Regression Classifier</h3>
+      <div class="subtitle">Binary price direction — BUY (up) / SELL (down) signal</div>
+      <div class="metrics-row">
+        <div class="metric-item"><div class="val red">0.504</div><div class="lbl">AUC-ROC</div></div>
+        <div class="metric-item"><div class="val red">49.86%</div><div class="lbl">Accuracy</div></div>
+        <div class="metric-item"><div class="val red">0.443</div><div class="lbl">F1 Score</div></div>
+      </div>
+      <table class="data-table">
+        <thead><tr><th></th><th>Predicted SELL</th><th>Predicted BUY</th></tr></thead>
+        <tbody>
+          <tr><td style="font-weight:600">Actual DOWN</td><td>13,106 <span class="badge badge-green">TN</span></td><td>2,977 <span class="badge badge-red">FP</span></td></tr>
+          <tr><td style="font-weight:600">Actual UP</td><td>13,117 <span class="badge badge-red">FN</span></td><td>2,898 <span class="badge badge-green">TP</span></td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:.82rem;color:var(--dim);margin-top:.5rem">Performance at random-chance level. Linear decision boundary is insufficient for noisy financial time series. A tree-based classifier would improve this significantly.</p>
+    </div>
+
+    <!-- COMPARISON -->
+    <h3 style="font-size:1.1rem;margin:2rem 0 1rem;font-weight:600">Model comparison</h3>
+    <table class="data-table">
+      <thead><tr><th>Model</th><th>Task</th><th>Key Metric</th><th>Value</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Random Forest</td><td>Regression</td><td>R²</td><td style="font-weight:700;color:var(--green)">0.987</td><td><span class="badge badge-green">Best</span></td></tr>
+        <tr><td>Gradient Boosted Trees</td><td>Regression</td><td>R²</td><td style="font-weight:700;color:var(--green)">0.982</td><td><span class="badge badge-amber">Good</span></td></tr>
+        <tr><td>Logistic Regression</td><td>Classification</td><td>AUC</td><td style="font-weight:700;color:var(--red)">0.504</td><td><span class="badge badge-red">Random</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- STREAMING -->
+<section id="streaming">
+  <div class="container">
+    <div class="section-label">Real-Time</div>
+    <h2 class="section-title">Kafka + Spark Streaming</h2>
+    <p class="section-desc">Live forex data feed simulation using Kafka KRaft mode (no Zookeeper, no Docker). Spark Structured Streaming consumes and generates real-time trading signals.</p>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-value">KRaft</div>
+        <div class="stat-label">Kafka Mode</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">3</div>
+        <div class="stat-label">Partitions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">200ms</div>
+        <div class="stat-label">Msg Interval</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">3</div>
+        <div class="stat-label">Live Queries</div>
+      </div>
+    </div>
+
+    <h3 style="font-size:1.1rem;margin:2rem 0 1rem;font-weight:600">Streaming queries</h3>
+    <div class="card-grid">
+      <div class="card">
+        <h3>forex_tick_stream</h3>
+        <p>Tick-level enriched data with MA crossover signals (BUY/SELL/HOLD), momentum classification, and volatility alerts.</p>
+        <div style="font-size:.8rem;color:var(--dim)">Trigger: every 10 seconds</div>
+      </div>
+      <div class="card">
+        <h3>forex_window_stats</h3>
+        <p>5-minute sliding window aggregation — avg/min/max close, price std deviation, average volatility per pair.</p>
+        <div style="font-size:.8rem;color:var(--dim)">Trigger: every 30 seconds</div>
+      </div>
+      <div class="card">
+        <h3>forex_live_mem</h3>
+        <p>In-memory queryable table with all enriched columns. Accessible via Spark SQL at runtime.</p>
+        <div style="font-size:.8rem;color:var(--dim)">Trigger: every 10 seconds</div>
+      </div>
+    </div>
+
+    <h3 style="font-size:1rem;margin:2rem 0 1rem;font-weight:600">Real-time signal generation</h3>
+    <table class="data-table">
+      <thead><tr><th>Signal</th><th>Logic</th><th>Values</th></tr></thead>
+      <tbody>
+        <tr><td style="font-weight:600">MA_Signal</td><td>MA5 vs MA20 crossover</td><td><span class="badge badge-green">BUY</span> <span class="badge badge-red">SELL</span> <span class="badge badge-amber">HOLD</span></td></tr>
+        <tr><td style="font-weight:600">Momentum</td><td>ChangePct thresholds (±0.5%)</td><td>STRONG_UP, WEAK_UP, FLAT, WEAK_DOWN, STRONG_DOWN</td></tr>
+        <tr><td style="font-weight:600">Volatility_Alert</td><td>Volatility5 > 0.01</td><td><span class="badge badge-red">HIGH_VOLATILITY</span> / NORMAL</td></tr>
+        <tr><td style="font-weight:600">Price_Level</td><td>Close vs MA20</td><td>ABOVE_MA20 / BELOW_MA20</td></tr>
+        <tr><td style="font-weight:600">Spread_Pct</td><td>(High − Low) / Close × 100</td><td>Continuous %</td></tr>
+      </tbody>
+    </table>
+
+    <h3 style="font-size:1rem;margin:2rem 0 1rem;font-weight:600">Sample streaming output</h3>
+    <div class="code-block"><span class="cm">--- Batch: 3 ---</span>
++---------------------+------+-------+--------+-----------+----------------+-----------+
+| Date                | Pair | Close | Signal | Momentum  | Volatility     | Price_Lvl |
++---------------------+------+-------+--------+-----------+----------------+-----------+
+| 2017-02-14 00:00:00 |EURUSD| 1.2295|  BUY   |STRONG_DOWN|HIGH_VOLATILITY | ABOVE_MA20|
+| 2017-02-15 00:00:00 |EURUSD| 1.2361|  BUY   |STRONG_UP  |NORMAL          | ABOVE_MA20|
+| 2017-02-16 00:00:00 |EURUSD| 1.2300|  BUY   |WEAK_DOWN  |NORMAL          | ABOVE_MA20|
+| 2017-02-17 00:00:00 |EURUSD| 1.2332|  BUY   |WEAK_UP    |NORMAL          | ABOVE_MA20|
+| 2017-02-18 00:00:00 |EURUSD| 1.2309|  BUY   |WEAK_DOWN  |NORMAL          | ABOVE_MA20|
++---------------------+------+-------+--------+-----------+----------------+-----------+
+
+<span class="cm">--- Windowed Stats ---</span>
++----------------------+------+-----+---------+---------+---------+-----------+
+| window               | Pair | Cnt | Avg_Cls | Min_Cls | Max_Cls | Price_Std |
++----------------------+------+-----+---------+---------+---------+-----------+
+| [22:25:00, 22:30:00] |EURUSD| 131 | 1.16803 | 1.10774 | 1.23653 | 0.034112  |
++----------------------+------+-----+---------+---------+---------+-----------+</div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ARCHITECTURE -->
+<section id="arch">
+  <div class="container">
+    <div class="section-label">Architecture</div>
+    <h2 class="section-title">System design</h2>
+
+    <h3 style="font-size:1rem;margin:2rem 0 1rem;font-weight:600">Batch pipeline</h3>
+    <div class="arch-flow">
+      <div class="arch-node"><h4>raw2/</h4><p>45 CSVs · 4.4 GB</p></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node"><h4>SparkHDFS<br>Preprocess</h4><p>Window functions</p></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node"><h4>spark_output/</h4><p>Enriched · 10.8 GB</p></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node"><h4>SparkML<br>Models</h4><p>RF + GBT + LR</p></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node"><h4>ml_output/</h4><p>Predictions</p></div>
+    </div>
+
+    <h3 style="font-size:1rem;margin:2rem 0 1rem;font-weight:600">Streaming pipeline</h3>
+    <div class="arch-flow">
+      <div class="arch-node"><h4>spark_output/</h4><p>Preprocessed CSVs</p></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node"><h4>Kafka<br>Producer</h4><p>200ms per msg</p></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node" style="border-color:var(--green)"><h4>forex-live</h4><p>Kafka topic · 3 parts</p></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node"><h4>Spark<br>Streaming</h4><p>Structured Streaming</p></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node"><h4>Live Signals</h4><p>BUY / SELL / HOLD</p></div>
+    </div>
+
+    <h3 style="font-size:1.1rem;margin:3rem 0 1rem;font-weight:600">Tech stack</h3>
+    <table class="data-table">
+      <thead><tr><th>Component</th><th>Technology</th><th>Version</th></tr></thead>
+      <tbody>
+        <tr><td>Language</td><td>Scala</td><td>2.12.18</td></tr>
+        <tr><td>Processing</td><td>Apache Spark</td><td>3.5.1</td></tr>
+        <tr><td>ML</td><td>Spark MLlib</td><td>3.5.1</td></tr>
+        <tr><td>Streaming</td><td>Spark Structured Streaming</td><td>3.5.1</td></tr>
+        <tr><td>Message Broker</td><td>Apache Kafka (KRaft)</td><td>3.6.1</td></tr>
+        <tr><td>Hadoop Client</td><td>hadoop-client</td><td>3.3.6</td></tr>
+        <tr><td>Build Tool</td><td>scala-cli</td><td>latest</td></tr>
+        <tr><td>Runtime</td><td>JDK</td><td>23</td></tr>
+      </tbody>
+    </table>
+
+    <h3 style="font-size:1.1rem;margin:2rem 0 1rem;font-weight:600">Project files</h3>
+    <table class="data-table">
+      <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td style="font-family:monospace;font-size:.85rem">SparkHDFSPreprocess.scala</td><td>Batch feature engineering — MA, volatility, RSI components</td></tr>
+        <tr><td style="font-family:monospace;font-size:.85rem">SparkMLModels.scala</td><td>RF + GBT regressors, Logistic Regression classifier</td></tr>
+        <tr><td style="font-family:monospace;font-size:.85rem">ForexKafkaProducer.scala</td><td>Publishes preprocessed rows to Kafka as JSON</td></tr>
+        <tr><td style="font-family:monospace;font-size:.85rem">SparkKafkaStreaming.scala</td><td>Structured Streaming consumer — signals + windowed stats</td></tr>
+        <tr><td style="font-family:monospace;font-size:.85rem">setup_kafka_kraft.ps1</td><td>Kafka KRaft install/start/stop script</td></tr>
+        <tr><td style="font-family:monospace;font-size:.85rem">run_streaming.ps1</td><td>End-to-end streaming pipeline runner</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<hr class="divider">
+
+<footer>
+  <div class="container">
+    <p style="margin-bottom:.5rem;font-weight:600;color:var(--text)">Forex Spark HDFS Pipeline</p>
+    <p>Distributed Forex Data Preprocessing, ML Prediction & Real-Time Streaming</p>
+    <p style="margin-top:.5rem">Apache Spark · Kafka · Scala · MLlib</p>
+  </div>
+</footer>
+
+<script>
+// Dot nav highlight on scroll
+const dots=document.querySelectorAll('.slide-dot');
+const sections=Array.from(dots).map(d=>{const h=d.getAttribute('href');return document.querySelector(h)});
+const obs=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){dots.forEach(d=>d.classList.remove('active'));const idx=sections.indexOf(e.target);if(idx>=0)dots[idx].classList.add('active')}})},{threshold:.4});
+sections.forEach(s=>{if(s)obs.observe(s)});
+</script>
+</body>
+</html>
