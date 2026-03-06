@@ -14,14 +14,22 @@ Raw Data (HDFS) → Spark Preprocessing → Feature Engineering → ML Models (R
                                                               Kafka Streaming
                                                                       ↓
                                                               MongoDB Storage
+
+Recursive 24h Prediction Pipeline:
+  Kafka Producer (--trigger) → forex-trigger → RecursivePredictor (24-step RF loop)
+                                                       ↓
+                                              forex-predictions-live → Live Dashboard (Chart.js)
 ```
 
 **Data Flow:**
 1. **Ingestion:** Raw forex CSVs from HDFS (`hdfs://localhost:9870/forex/raw/`)
 2. **Preprocessing:** Apache Spark 3.3.0 — feature engineering (MA, volatility, RSI components)
-3. **ML Training:** Random Forest, Gradient Boosted Trees, Logistic Regression
+3. **ML Training:** Random Forest, Gradient Boosted Trees, Logistic Regression — saves RF h+1 model
 4. **Streaming:** Predictions streamed to Apache Kafka (`forex-predictions` topic)
 5. **Storage:** Kafka consumer writes to MongoDB (`forex_db` database)
+6. **Trigger:** ForexKafkaProducer `--trigger` mode sends last row per pair to `forex-trigger`
+7. **Recursive Prediction:** RecursivePredictor loads saved RF model, runs 24-step loop, publishes to `forex-predictions-live`
+8. **Dashboard:** Chart.js dashboard renders 24h forecast curves with animated display
 
 ## Features
 
@@ -49,9 +57,20 @@ Raw Data (HDFS) → Spark Preprocessing → Feature Engineering → ML Models (R
 - Date-based 80/20 train/test split across 11 currency pairs
 
 ### Streaming Pipeline
-- **Apache Kafka:** KRaft mode (no ZooKeeper), `forex-predictions` topic with 3 partitions
+- **Apache Kafka:** KRaft mode (no ZooKeeper), topics: `forex-predictions`, `forex-live`, `forex-trigger`, `forex-predictions-live` (3 partitions each)
 - **StreamPredictions:** Reads ML output CSVs and streams to Kafka as JSON messages
 - **MongoDBSink:** Kafka consumer that batch-inserts predictions into MongoDB collections
+
+### Recursive 24h Prediction Pipeline
+- **Trigger Mode:** ForexKafkaProducer `--trigger` sends last row per pair with computed lag features to `forex-trigger` topic
+- **RecursivePredictor:** Loads saved RF h+1 PipelineModel, consumes triggers, runs 24-step recursive loop
+- **Autoregressive Loop:** Each prediction feeds back as input — recalculates MA5, MA20, Volatility5, lag features
+- **Output:** Publishes hourly forecasts to `forex-predictions-live` Kafka topic
+
+### Live Dashboard
+- **Technology:** Chart.js 4.4.4 with dark theme and glass-morphism styling
+- **Features:** 24h price forecast curve, animated point-by-point display, stats panel, prediction log
+- **Data Source:** Consumes from `forex-predictions-live` topic or MongoDB fallback
 
 ### MongoDB Storage
 - **Database:** `forex_db`
@@ -79,6 +98,7 @@ Raw Data (HDFS) → Spark Preprocessing → Feature Engineering → ML Models (R
 - **ML:** Spark MLlib (RandomForest, GBT, LogisticRegression)
 - **Storage:** Hadoop HDFS 3.3.2, MongoDB 7.x
 - **Streaming:** Apache Kafka 3.6.1 (KRaft mode)
+- **Visualization:** Chart.js 4.4.4
 - **Build Tool:** Scala CLI
 - **Container:** Docker (for HDFS access)
 
@@ -87,16 +107,18 @@ Raw Data (HDFS) → Spark Preprocessing → Feature Engineering → ML Models (R
 ```
 bda-forex/
 ├── SparkHDFSPreprocess.scala    # Spark preprocessing & feature engineering
-├── SparkMLModels.scala          # ML training (RF, GBT, LR) + Kafka producer
+├── SparkMLModels.scala          # ML training (RF, GBT, LR) + model save + Kafka producer
+├── ForexKafkaProducer.scala     # Live forex feed Kafka producer + trigger mode
+├── RecursivePredictor.scala     # 24-step recursive RF prediction engine
 ├── StreamPredictions.scala      # CSV → Kafka streaming bridge
 ├── MongoDBSink.scala            # Kafka consumer → MongoDB writer
-├── ForexKafkaProducer.scala     # Live forex feed Kafka producer
 ├── SparkKafkaStreaming.scala     # Spark Structured Streaming consumer
 ├── SparkUIDemo.scala            # Spark UI visualization demo
+├── dashboard.html               # Chart.js live 24h forecast dashboard
 ├── presentation.html            # Project presentation (GitHub Pages)
 ├── raw2/                        # Local raw data files (15 pairs × 3 timeframes)
 ├── spark_output/                # Spark processed files
-├── ml_output/                   # ML prediction CSVs
+├── ml_output/                   # ML prediction CSVs + saved RF model
 ├── run.ps1                      # Windows execution script
 ├── run.sh                       # Linux/Mac execution script
 └── README.md                    # Project documentation
@@ -148,7 +170,20 @@ scala-cli run --java-opt "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED" SparkH
 ```bash
 scala-cli run SparkMLModels.scala
 ```
-Trains RF, GBT, LR models on preprocessed data, evaluates metrics, outputs predictions to `ml_output/`, and streams results to Kafka.
+Trains RF, GBT, LR models on preprocessed data, evaluates metrics, outputs predictions to `ml_output/`, saves RF h+1 PipelineModel to `ml_output/rf_h1_model`, and streams results to Kafka.
+
+### Trigger & Recursive Prediction
+```bash
+# Send last-row trigger per pair to Kafka
+scala-cli run ForexKafkaProducer.scala -- --trigger
+
+# Run 24-step recursive RF prediction loop
+scala-cli run RecursivePredictor.scala
+```
+The trigger mode sends the latest data point for each pair to `forex-trigger`. RecursivePredictor consumes triggers, loads the saved RF model, and produces 24 hourly forecasts to `forex-predictions-live`.
+
+### Live Dashboard
+Open `dashboard.html` in a browser to view 24h price forecast curves with animated point-by-point display.
 
 ### Streaming Predictions to Kafka
 ```bash

@@ -256,8 +256,9 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       <li><span class="dot green"></span><span><strong>Batch Layer</strong> &mdash; SparkHDFSPreprocess.scala reads 45 raw CSVs, applies Window functions (MA5, MA20, Volatility5, RSI components), outputs enriched data to spark_output/.</span></li>
       <li><span class="dot green"></span><span><strong>ML Layer</strong> &mdash; SparkMLModels.scala trains 24 RF + 24 GBT models (one per hour h+1 to h+24) plus LR for 24h direction, using Spark MLlib Pipeline API on hourly data with 19 features.</span></li>
       <li><span class="dot green"></span><span><strong>Streaming Layer</strong> &mdash; ForexKafkaProducer.scala publishes processed rows to Kafka topic at 200ms intervals. SparkKafkaStreaming.scala consumes and generates live BUY/SELL/HOLD signals.</span></li>
+      <li><span class="dot green"></span><span><strong>Recursive Prediction</strong> &mdash; ForexKafkaProducer triggers last-row per pair &rarr; RecursivePredictor.scala loads saved RF model and runs 24-step recursive loop, publishing hourly forecasts to forex-predictions-live.</span></li>
       <li><span class="dot green"></span><span><strong>MongoDB Pipeline</strong> &mdash; StreamPredictions.scala streams ML output to Kafka (forex-predictions topic). MongoDBSink.scala consumes and batch-inserts 96,294 predictions into MongoDB (forex_db).</span></li>
-      <li><span class="dot green"></span><span><strong>Signal Generation</strong> &mdash; MA crossover signals, momentum classification, volatility alerts, and price level indicators computed in real-time.</span></li>
+      <li><span class="dot green"></span><span><strong>Live Dashboard</strong> &mdash; Chart.js-powered dashboard.html renders 24-hour price forecast curves with animated point-by-point display, stats panel, and prediction log.</span></li>
     </ul>
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-value">4.4 GB</div><div class="stat-label">Raw Input</div></div>
@@ -313,7 +314,18 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       <div class="arrow">&rarr;</div>
       <div class="node" style="border-color:var(--green)"><h4>MongoDB</h4><p>96,294 docs</p></div>
     </div>
-  </div>
+    <p style="font-size:.85rem;color:var(--dim);margin:1.5rem 0 .75rem;font-weight:600">Recursive 24h Prediction Pipeline</p>
+    <div class="flow">
+      <div class="node"><h4>Kafka Producer</h4><p>--trigger mode</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node" style="border-color:var(--purple)"><h4>forex-trigger</h4><p>Last row per pair</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node" style="border-color:var(--amber)"><h4>RecursivePredictor</h4><p>24-step RF loop</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node" style="border-color:var(--purple)"><h4>forex-predictions-live</h4><p>Hourly forecasts</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node" style="border-color:var(--green)"><h4>Dashboard</h4><p>Chart.js &middot; Live</p></div>
+    </div>  </div>
   <div class="slide-number">07 / 15</div>
 </div>
 
@@ -343,6 +355,16 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
         <div class="step-t">Kafka Streaming</div>
         <div class="step-d">Publish processed data to Kafka (KRaft). Spark Structured Streaming consumes, enriches with signals, outputs to console + memory sink.</div>
       </div>
+      <div class="step">
+        <div class="step-n">Phase 5</div>
+        <div class="step-t">Recursive Prediction</div>
+        <div class="step-d">Trigger last row per pair &rarr; Load saved RF model &rarr; 24-step recursive loop predicting next hour, feeding output back as input. Publishes to forex-predictions-live.</div>
+      </div>
+      <div class="step">
+        <div class="step-n">Phase 6</div>
+        <div class="step-t">Live Dashboard</div>
+        <div class="step-d">Chart.js dashboard renders 24h forecast curve with animated point-by-point display, stats panel (direction, change %, MA5, volatility), and prediction log.</div>
+      </div>
     </div>
     <ul class="points" style="margin-top:1rem">
       <li><span class="dot"></span><span><strong>Spark Config</strong> &mdash; local[*] mode, 4 GB driver memory, AQE enabled, DataFrame API with Window functions.</span></li>
@@ -366,6 +388,8 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
         <tr><td>Stream Processing</td><td>Spark Structured Streaming</td><td>3.5.1</td><td>Real-time signal generation</td></tr>
         <tr><td>Message Broker</td><td>Apache Kafka (KRaft)</td><td>3.6.1</td><td>Event transport, buffering</td></tr>
         <tr><td>Hadoop Runtime</td><td>hadoop-client</td><td>3.3.6</td><td>Filesystem abstraction</td></tr>
+        <tr><td>Database</td><td>MongoDB</td><td>7.x</td><td>Prediction storage (96,294 docs)</td></tr>
+        <tr><td>Visualization</td><td>Chart.js</td><td>4.4.4</td><td>Live 24h forecast dashboard</td></tr>
         <tr><td>Build / Runner</td><td>scala-cli</td><td>latest</td><td>Compile and run .scala files</td></tr>
         <tr><td>JVM</td><td>JDK</td><td>23</td><td>Runtime environment</td></tr>
       </tbody>
@@ -396,6 +420,18 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
         <h4>SparkKafkaStreaming.scala</h4>
         <p>Streaming consumer. Reads from Kafka, parses JSON, enriches with MA crossover signals, momentum, volatility alerts. Runs 3 concurrent streaming queries.</p>
       </div>
+      <div class="card">
+        <h4>RecursivePredictor.scala</h4>
+        <p>24-hour recursive forecasting engine. Loads saved RF h+1 PipelineModel, consumes triggers from Kafka, runs 24-step recursive loop publishing each prediction to forex-predictions-live.</p>
+      </div>
+      <div class="card">
+        <h4>MongoDBSink.scala</h4>
+        <p>Kafka consumer that reads from forex-predictions topic and batch-inserts predictions into MongoDB (forex_db). Stores 96,294 documents across 3 collections.</p>
+      </div>
+      <div class="card">
+        <h4>dashboard.html</h4>
+        <p>Chart.js-powered live dashboard. Renders 24h price forecast curve with animated display, stats panel (direction, change %, MA5, volatility), and scrollable prediction log.</p>
+      </div>
     </div>
     <table class="tbl">
       <thead><tr><th>Module</th><th>Input</th><th>Output</th></tr></thead>
@@ -404,6 +440,9 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
         <tr><td>ML Models</td><td>spark_output/ (hourly files)</td><td>ml_output/ (24h predictions CSV)</td></tr>
         <tr><td>Kafka Producer</td><td>spark_output/ CSVs</td><td>Kafka topic forex-live</td></tr>
         <tr><td>Streaming Consumer</td><td>Kafka topic forex-live</td><td>Console + memory sink</td></tr>
+        <tr><td>Recursive Predictor</td><td>Kafka topic forex-trigger</td><td>Kafka topic forex-predictions-live</td></tr>
+        <tr><td>MongoDB Sink</td><td>Kafka topic forex-predictions</td><td>MongoDB (96,294 docs)</td></tr>
+        <tr><td>Live Dashboard</td><td>forex-predictions-live / MongoDB</td><td>Chart.js visualization</td></tr>
       </tbody>
     </table>
   </div>
@@ -465,6 +504,8 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       <li><span class="dot green"></span><span><strong>No Cloud Dependency</strong> &mdash; Entire stack runs locally. Kafka KRaft mode eliminates Zookeeper and Docker overhead.</span></li>
       <li><span class="dot green"></span><span><strong>Fault Tolerance</strong> &mdash; Spark Structured Streaming provides exactly-once processing with checkpoint-based recovery.</span></li>
       <li><span class="dot green"></span><span><strong>Multi-Horizon Prediction</strong> &mdash; 24 separate models per algorithm provide granular hourly forecasts, showing how accuracy changes over time.</span></li>
+      <li><span class="dot green"></span><span><strong>Recursive Autoregressive Forecasting</strong> &mdash; Saved RF model drives a 24-step recursive loop where each prediction feeds back as input, enabling real-time 24h forecasts from a single trigger.</span></li>
+      <li><span class="dot green"></span><span><strong>Live Visualization</strong> &mdash; Chart.js dashboard animates 24h forecast curves point-by-point, providing instant visual insight into predicted price trajectories.</span></li>
       <li><span class="dot green"></span><span><strong>Reproducibility</strong> &mdash; All code in Scala with scala-cli directives. Single command to compile and run each module.</span></li>
     </ul>
   </div>
@@ -482,6 +523,9 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       <li><span class="dot"></span><span>Trained 24 Random Forest + 24 GBT models for multi-horizon prediction &mdash; forecasting close price at each of the next 24 hours (h+1 to h+24).</span></li>
       <li><span class="dot"></span><span>Logistic Regression classifies 24h-ahead direction (BUY / SELL), providing trading signals alongside the hourly price forecasts.</span></li>
       <li><span class="dot"></span><span>Real-time streaming pipeline with Kafka KRaft and Spark Structured Streaming successfully generates live trading signals across 3 concurrent queries.</span></li>
+      <li><span class="dot"></span><span>Implemented a 24-step recursive prediction engine that loads a saved RF model, receives triggers via Kafka, and produces a full 24h price forecast curve for each currency pair.</span></li>
+      <li><span class="dot"></span><span>Built a live Chart.js dashboard that visualizes predicted price trajectories with animated point-by-point rendering and real-time statistics.</span></li>
+      <li><span class="dot"></span><span>Stored 96,294 ML predictions in MongoDB via Kafka consumer pipeline, enabling persistent querying across rf_predictions, gbt_predictions, and lr_signals collections.</span></li>
     </ul>
   </div>
   <div class="slide-number">13 / 15</div>
@@ -495,8 +539,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
     <ul class="points">
       <li><span class="dot purple"></span><span><strong>Deep Learning Integration</strong> &mdash; Add LSTM or Transformer-based models via Spark DL pipelines for improved time-series prediction.</span></li>
       <li><span class="dot purple"></span><span><strong>Multi-Node Cluster Deployment</strong> &mdash; Deploy on a Spark standalone cluster or YARN for true distributed processing across multiple machines.</span></li>
-      <li><span class="dot purple"></span><span><strong>Real-Time ML Inference</strong> &mdash; Integrate trained models into the streaming pipeline for live price prediction alongside signal generation.</span></li>
-      <li><span class="dot purple"></span><span><strong>Dashboard Visualization</strong> &mdash; Build a web dashboard (React / Grafana) connected to the streaming output for real-time chart visualization.</span></li>
+      <li><span class="dot purple"></span><span><strong>Ensemble Recursive Models</strong> &mdash; Extend the recursive prediction loop to combine RF + GBT + LSTM predictions for improved multi-model ensemble forecasting.</span></li>
       <li><span class="dot purple"></span><span><strong>Tree-Based Classifier</strong> &mdash; Replace Logistic Regression with Random Forest Classifier or XGBoost for better direction prediction.</span></li>
       <li><span class="dot purple"></span><span><strong>Parquet / Delta Lake</strong> &mdash; Switch output format from CSV to Parquet or Delta Lake for columnar compression and ACID transactions.</span></li>
       <li><span class="dot purple"></span><span><strong>Live API Feed</strong> &mdash; Replace CSV-based Kafka producer with a real forex API (OANDA, Alpha Vantage) for actual live data ingestion.</span></li>
