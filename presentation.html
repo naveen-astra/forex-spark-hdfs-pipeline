@@ -163,7 +163,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
   <div class="slide-inner hero">
     <div class="course-tag">Big Data Analytics &mdash; Semester 6</div>
     <h1><span class="g">Forex Spark Pipeline</span></h1>
-    <p class="sub">Distributed Batch Preprocessing, Machine Learning Prediction &amp; Real-Time Streaming Analytics on Forex Market Data</p>
+    <p class="sub">Distributed Batch Preprocessing, 24-Hour Ahead ML Prediction &amp; Real-Time Streaming Analytics on Forex Market Data</p>
     <div class="team-label">Team 15</div>
     <div class="team-grid">
       <div class="member"><div class="name">Naveen Babu M S</div><div class="roll">CB.SC.U4AIE23153</div></div>
@@ -174,6 +174,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
     <div class="tags">
       <span class="tag">Apache Spark 3.5.1</span>
       <span class="tag">Apache Kafka 3.6.1</span>
+      <span class="tag">MongoDB</span>
       <span class="tag">Scala 2.12</span>
       <span class="tag">Spark MLlib</span>
       <span class="tag">Structured Streaming</span>
@@ -222,7 +223,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
     <ul class="points">
       <li><span class="dot green"></span><span>Build a Spark-based batch pipeline to preprocess 4.4 GB of raw forex data across 45 CSV files, applying window functions for technical indicator computation.</span></li>
       <li><span class="dot green"></span><span>Engineer 19 features including moving averages (MA5, MA20), volatility, lag features, and RSI components using Spark DataFrame API.</span></li>
-      <li><span class="dot green"></span><span>Train and evaluate three Spark MLlib models &mdash; Random Forest Regressor, Gradient Boosted Trees, and Logistic Regression &mdash; for price prediction and signal classification.</span></li>
+      <li><span class="dot green"></span><span>Train and evaluate Spark MLlib models &mdash; Random Forest (24 models), Gradient Boosted Trees (24 models), and Logistic Regression &mdash; to predict close price at each of the next 24 hours.</span></li>
       <li><span class="dot green"></span><span>Implement a real-time streaming pipeline using Apache Kafka (KRaft mode) and Spark Structured Streaming to generate live trading signals.</span></li>
       <li><span class="dot green"></span><span>Deploy windowed aggregations (5-minute sliding windows) for real-time statistical analysis per currency pair.</span></li>
     </ul>
@@ -253,14 +254,15 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
     <div class="slide-title">Solution overview</div>
     <ul class="points">
       <li><span class="dot green"></span><span><strong>Batch Layer</strong> &mdash; SparkHDFSPreprocess.scala reads 45 raw CSVs, applies Window functions (MA5, MA20, Volatility5, RSI components), outputs enriched data to spark_output/.</span></li>
-      <li><span class="dot green"></span><span><strong>ML Layer</strong> &mdash; SparkMLModels.scala trains 3 models using Spark MLlib Pipeline API (VectorAssembler &rarr; StandardScaler &rarr; Model) on 43,770 records with 19 features.</span></li>
+      <li><span class="dot green"></span><span><strong>ML Layer</strong> &mdash; SparkMLModels.scala trains 24 RF + 24 GBT models (one per hour h+1 to h+24) plus LR for 24h direction, using Spark MLlib Pipeline API on hourly data with 19 features.</span></li>
       <li><span class="dot green"></span><span><strong>Streaming Layer</strong> &mdash; ForexKafkaProducer.scala publishes processed rows to Kafka topic at 200ms intervals. SparkKafkaStreaming.scala consumes and generates live BUY/SELL/HOLD signals.</span></li>
+      <li><span class="dot green"></span><span><strong>MongoDB Pipeline</strong> &mdash; StreamPredictions.scala streams ML output to Kafka (forex-predictions topic). MongoDBSink.scala consumes and batch-inserts 96,294 predictions into MongoDB (forex_db).</span></li>
       <li><span class="dot green"></span><span><strong>Signal Generation</strong> &mdash; MA crossover signals, momentum classification, volatility alerts, and price level indicators computed in real-time.</span></li>
     </ul>
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-value">4.4 GB</div><div class="stat-label">Raw Input</div></div>
       <div class="stat-card"><div class="stat-value">10.8 GB</div><div class="stat-label">Processed Output</div></div>
-      <div class="stat-card"><div class="stat-value c-green">0.987</div><div class="stat-label">Best R&sup2;</div></div>
+      <div class="stat-card"><div class="stat-value c-green">24</div><div class="stat-label">Hour Horizon</div></div>
       <div class="stat-card"><div class="stat-value c-blue">3</div><div class="stat-label">Live Queries</div></div>
     </div>
   </div>
@@ -281,9 +283,9 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       <div class="arrow">&rarr;</div>
       <div class="node"><h4>spark_output/</h4><p>Enriched &middot; 10.8 GB</p></div>
       <div class="arrow">&rarr;</div>
-      <div class="node"><h4>Spark MLlib</h4><p>RF + GBT + LR</p></div>
+      <div class="node"><h4>Spark MLlib</h4><p>24&times;RF + 24&times;GBT + LR</p></div>
       <div class="arrow">&rarr;</div>
-      <div class="node"><h4>ml_output/</h4><p>Predictions</p></div>
+      <div class="node"><h4>ml_output/</h4><p>24h Predictions</p></div>
     </div>
 
     <p style="font-size:.85rem;color:var(--dim);margin:1.5rem 0 .75rem;font-weight:600">Streaming Pipeline</p>
@@ -297,6 +299,19 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       <div class="node"><h4>Spark Streaming</h4><p>Structured Streaming</p></div>
       <div class="arrow">&rarr;</div>
       <div class="node" style="border-color:var(--green)"><h4>Live Signals</h4><p>BUY / SELL / HOLD</p></div>
+    </div>
+
+    <p style="font-size:.85rem;color:var(--dim);margin:1.5rem 0 .75rem;font-weight:600">ML → MongoDB Pipeline</p>
+    <div class="flow">
+      <div class="node"><h4>ml_output/</h4><p>RF + GBT + LR CSVs</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node"><h4>StreamPredictions</h4><p>CSV → JSON</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node" style="border-color:var(--purple)"><h4>forex-predictions</h4><p>Kafka &middot; 3 parts</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node"><h4>MongoDBSink</h4><p>Batch Insert</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node" style="border-color:var(--green)"><h4>MongoDB</h4><p>96,294 docs</p></div>
     </div>
   </div>
   <div class="slide-number">07 / 15</div>
@@ -321,7 +336,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       <div class="step">
         <div class="step-n">Phase 3</div>
         <div class="step-t">ML Training</div>
-        <div class="step-d">Build Spark ML Pipeline: VectorAssembler &rarr; StandardScaler &rarr; Model. Train RF, GBT, LR on 80/20 split. 19 features, 43,770 records.</div>
+        <div class="step-d">Build Spark ML Pipeline: VectorAssembler &rarr; StandardScaler &rarr; Model. Train 24 RF + 24 GBT models (one per hour) + LR classifier on 80/20 split using hourly data. 19 features.</div>
       </div>
       <div class="step">
         <div class="step-n">Phase 4</div>
@@ -371,7 +386,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       </div>
       <div class="card">
         <h4>SparkMLModels.scala</h4>
-        <p>ML module using Spark MLlib Pipeline API. Trains Random Forest (100 trees), GBT (100 iters), and Logistic Regression. VectorAssembler + StandardScaler on 19 features.</p>
+        <p>24-hour prediction module using Spark MLlib Pipeline API. Trains 24 Random Forest + 24 GBT regressors (h+1 to h+24) plus Logistic Regression for direction. VectorAssembler + StandardScaler on 19 features from hourly data.</p>
       </div>
       <div class="card">
         <h4>ForexKafkaProducer.scala</h4>
@@ -386,7 +401,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       <thead><tr><th>Module</th><th>Input</th><th>Output</th></tr></thead>
       <tbody>
         <tr><td>Preprocessing</td><td>raw2/ (45 CSVs, 4.4 GB)</td><td>spark_output/ (10.8 GB enriched)</td></tr>
-        <tr><td>ML Models</td><td>spark_output/ (daily files)</td><td>ml_output/ (predictions CSV)</td></tr>
+        <tr><td>ML Models</td><td>spark_output/ (hourly files)</td><td>ml_output/ (24h predictions CSV)</td></tr>
         <tr><td>Kafka Producer</td><td>spark_output/ CSVs</td><td>Kafka topic forex-live</td></tr>
         <tr><td>Streaming Consumer</td><td>Kafka topic forex-live</td><td>Console + memory sink</td></tr>
       </tbody>
@@ -399,54 +414,39 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
 <div class="slide" id="s11">
   <div class="slide-inner">
     <div class="slide-topic">Results</div>
-    <div class="slide-title">Model performance &amp; output</div>
+    <div class="slide-title">24-hour prediction performance</div>
 
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-value">45</div><div class="stat-label">Files Processed</div></div>
-      <div class="stat-card"><div class="stat-value">43,770</div><div class="stat-label">Records Trained</div></div>
+      <div class="stat-card"><div class="stat-value">24</div><div class="stat-label">Hour Horizon</div></div>
       <div class="stat-card"><div class="stat-value c-blue">19</div><div class="stat-label">Features</div></div>
-      <div class="stat-card"><div class="stat-value c-green">0.987</div><div class="stat-label">Best R&sup2;</div></div>
+      <div class="stat-card"><div class="stat-value c-green">48</div><div class="stat-label">Models Trained</div></div>
     </div>
 
     <div class="model">
-      <h3>Random Forest Regressor</h3>
-      <div class="msub">100 trees, maxDepth = 10 &mdash; Next-day close prediction</div>
-      <div class="mrow">
-        <div class="mi"><div class="mv c-green">0.987</div><div class="ml">R&sup2; Score</div></div>
-        <div class="mi"><div class="mv">6.399</div><div class="ml">RMSE</div></div>
-        <div class="mi"><div class="mv">2.013</div><div class="ml">MAE</div></div>
-      </div>
-      <p style="font-size:.8rem;color:var(--dim)">Top features: High (18.56%), Open (12.25%), Close_lag3 (12.10%), Close_lag1 (11.76%), MA5 (8.14%)</p>
+      <h3>Random Forest Regressor &times; 24</h3>
+      <div class="msub">100 trees, maxDepth = 10 &mdash; One model per hour (h+1 to h+24)</div>
+      <p style="font-size:.82rem;line-height:1.7">Trains a separate RF model for each of the next 24 hours. Each model predicts the Close price at that specific hour ahead. Reports per-hour RMSE, MAE, and R&sup2; plus an average R&sup2; across all 24 horizons.</p>
     </div>
 
     <div class="model">
-      <h3>Gradient Boosted Trees</h3>
-      <div class="msub">100 iterations, stepSize = 0.05 &mdash; Next-day close prediction</div>
-      <div class="mrow">
-        <div class="mi"><div class="mv c-green">0.982</div><div class="ml">R&sup2; Score</div></div>
-        <div class="mi"><div class="mv">7.493</div><div class="ml">RMSE</div></div>
-        <div class="mi"><div class="mv">1.876</div><div class="ml">MAE</div></div>
-      </div>
-      <p style="font-size:.8rem;color:var(--dim)">Feature dominance: High (96.20%) &mdash; GBT converged on a single feature</p>
+      <h3>Gradient Boosted Trees &times; 24</h3>
+      <div class="msub">100 iterations, stepSize = 0.05 &mdash; One model per hour (h+1 to h+24)</div>
+      <p style="font-size:.82rem;line-height:1.7">Same multi-horizon approach with GBT. Provides per-hour metrics and average R&sup2;. Allows comparison of how prediction accuracy degrades as the forecast horizon increases.</p>
     </div>
 
     <div class="model">
       <h3>Logistic Regression Classifier</h3>
-      <div class="msub">Binary direction &mdash; BUY / SELL signal</div>
-      <div class="mrow">
-        <div class="mi"><div class="mv c-red">0.504</div><div class="ml">AUC-ROC</div></div>
-        <div class="mi"><div class="mv c-red">49.86%</div><div class="ml">Accuracy</div></div>
-        <div class="mi"><div class="mv c-red">0.443</div><div class="ml">F1</div></div>
-      </div>
-      <p style="font-size:.8rem;color:var(--dim)">At random-chance level &mdash; linear boundary insufficient for noisy financial data</p>
+      <div class="msub">Binary direction at h+24 &mdash; BUY / SELL signal</div>
+      <p style="font-size:.82rem;line-height:1.7">Classifies whether price at h+24 will be higher (BUY) or lower (SELL) than the current price. Reports AUC-ROC, Accuracy, F1.</p>
     </div>
 
     <table class="tbl">
-      <thead><tr><th>Model</th><th>Task</th><th>Key Metric</th><th>Value</th><th>Verdict</th></tr></thead>
+      <thead><tr><th>Model</th><th>Task</th><th>Approach</th><th>Output</th></tr></thead>
       <tbody>
-        <tr><td>Random Forest</td><td>Regression</td><td>R&sup2;</td><td style="font-weight:700;color:var(--green)">0.987</td><td><span class="badge b-green">Best</span></td></tr>
-        <tr><td>GBT</td><td>Regression</td><td>R&sup2;</td><td style="font-weight:700;color:var(--green)">0.982</td><td><span class="badge b-amber">Good</span></td></tr>
-        <tr><td>Logistic Reg.</td><td>Classification</td><td>AUC</td><td style="font-weight:700;color:var(--red)">0.504</td><td><span class="badge b-red">Random</span></td></tr>
+        <tr><td>Random Forest &times;24</td><td>Regression</td><td>Per-hour model</td><td><span class="badge b-green">24 price forecasts</span></td></tr>
+        <tr><td>GBT &times;24</td><td>Regression</td><td>Per-hour model</td><td><span class="badge b-blue">24 price forecasts</span></td></tr>
+        <tr><td>Logistic Reg.</td><td>Classification</td><td>24h direction</td><td><span class="badge b-amber">BUY / SELL</span></td></tr>
       </tbody>
     </table>
   </div>
@@ -464,7 +464,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
       <li><span class="dot green"></span><span><strong>Real-Time Signals</strong> &mdash; Kafka + Structured Streaming delivers live BUY/SELL/HOLD trading signals with sub-second latency.</span></li>
       <li><span class="dot green"></span><span><strong>No Cloud Dependency</strong> &mdash; Entire stack runs locally. Kafka KRaft mode eliminates Zookeeper and Docker overhead.</span></li>
       <li><span class="dot green"></span><span><strong>Fault Tolerance</strong> &mdash; Spark Structured Streaming provides exactly-once processing with checkpoint-based recovery.</span></li>
-      <li><span class="dot green"></span><span><strong>Feature Richness</strong> &mdash; 19 engineered features including lag values, moving averages, volatility, and RSI components for robust ML training.</span></li>
+      <li><span class="dot green"></span><span><strong>Multi-Horizon Prediction</strong> &mdash; 24 separate models per algorithm provide granular hourly forecasts, showing how accuracy changes over time.</span></li>
       <li><span class="dot green"></span><span><strong>Reproducibility</strong> &mdash; All code in Scala with scala-cli directives. Single command to compile and run each module.</span></li>
     </ul>
   </div>
@@ -479,9 +479,8 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Bl
     <ul class="points">
       <li><span class="dot"></span><span>Successfully built an end-to-end big data pipeline for forex analysis using Apache Spark, Kafka, and Scala.</span></li>
       <li><span class="dot"></span><span>Preprocessed 4.4 GB of raw data (45 files, 15 pairs, 3 timeframes) into 10.8 GB of feature-enriched output using Spark Window functions.</span></li>
-      <li><span class="dot"></span><span>Random Forest Regressor achieved R&sup2; = 0.987 for next-day close price prediction, demonstrating high accuracy with distributed ML.</span></li>
-      <li><span class="dot"></span><span>GBT Regressor performed well (R&sup2; = 0.982) but showed feature dominance on High (96.2%), indicating potential for hyperparameter tuning.</span></li>
-      <li><span class="dot"></span><span>Logistic Regression for direction classification performed at random chance (AUC = 0.504), confirming that linear models are insufficient for financial time series.</span></li>
+      <li><span class="dot"></span><span>Trained 24 Random Forest + 24 GBT models for multi-horizon prediction &mdash; forecasting close price at each of the next 24 hours (h+1 to h+24).</span></li>
+      <li><span class="dot"></span><span>Logistic Regression classifies 24h-ahead direction (BUY / SELL), providing trading signals alongside the hourly price forecasts.</span></li>
       <li><span class="dot"></span><span>Real-time streaming pipeline with Kafka KRaft and Spark Structured Streaming successfully generates live trading signals across 3 concurrent queries.</span></li>
     </ul>
   </div>
