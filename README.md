@@ -9,13 +9,19 @@ This project implements a scalable data pipeline that fetches forex data from HD
 ## Architecture
 
 ```
-Raw Data (HDFS) → Spark Processing → Feature Engineering → Preprocessed Data (HDFS)
+Raw Data (HDFS) → Spark Preprocessing → Feature Engineering → ML Models (RF, GBT, LR)
+                                                                      ↓
+                                                              Kafka Streaming
+                                                                      ↓
+                                                              MongoDB Storage
 ```
 
 **Data Flow:**
-- Source: HDFS at `hdfs://localhost:9870/forex/raw/`
-- Processing: Apache Spark 3.3.0 with DataFrame API
-- Storage: HDFS at `hdfs://localhost:9870/forex_new/spark_processed/`
+1. **Ingestion:** Raw forex CSVs from HDFS (`hdfs://localhost:9870/forex/raw/`)
+2. **Preprocessing:** Apache Spark 3.3.0 — feature engineering (MA, volatility, RSI components)
+3. **ML Training:** Random Forest, Gradient Boosted Trees, Logistic Regression
+4. **Streaming:** Predictions streamed to Apache Kafka (`forex-predictions` topic)
+5. **Storage:** Kafka consumer writes to MongoDB (`forex_db` database)
 
 ## Features
 
@@ -36,6 +42,22 @@ Raw Data (HDFS) → Spark Processing → Feature Engineering → Preprocessed Da
 - Automatic filtering of incomplete data
 - Validation and statistics computation
 
+### Machine Learning Models
+- **Random Forest:** 50 trees, maxDepth=8 for price prediction
+- **Gradient Boosted Trees:** 50 iterations, stepSize=0.05 for price prediction
+- **Logistic Regression:** Binary classification for BUY/SELL signals
+- Date-based 80/20 train/test split across 11 currency pairs
+
+### Streaming Pipeline
+- **Apache Kafka:** KRaft mode (no ZooKeeper), `forex-predictions` topic with 3 partitions
+- **StreamPredictions:** Reads ML output CSVs and streams to Kafka as JSON messages
+- **MongoDBSink:** Kafka consumer that batch-inserts predictions into MongoDB collections
+
+### MongoDB Storage
+- **Database:** `forex_db`
+- **Collections:** `rf_predictions`, `gbt_predictions`, `lr_signals`
+- **Total Documents:** 96,294 (32,098 per model)
+
 ## Dataset
 
 **Currency Pairs:** 15 major forex pairs
@@ -54,7 +76,9 @@ Raw Data (HDFS) → Spark Processing → Feature Engineering → Preprocessed Da
 
 - **Language:** Scala 2.12.18
 - **Processing:** Apache Spark 3.3.0
-- **Storage:** Hadoop HDFS 3.3.2
+- **ML:** Spark MLlib (RandomForest, GBT, LogisticRegression)
+- **Storage:** Hadoop HDFS 3.3.2, MongoDB 7.x
+- **Streaming:** Apache Kafka 3.6.1 (KRaft mode)
 - **Build Tool:** Scala CLI
 - **Container:** Docker (for HDFS access)
 
@@ -62,13 +86,20 @@ Raw Data (HDFS) → Spark Processing → Feature Engineering → Preprocessed Da
 
 ```
 bda-forex/
-├── SparkHDFSPreprocess.scala    # Main Spark preprocessing script
-├── raw2/                         # Local raw data files
-├── processed/                    # Preprocessed output (local)
-├── spark_output/                 # Spark processed files
-├── run.ps1                       # Windows execution script
-├── run.sh                        # Linux/Mac execution script
-└── README.md                     # Project documentation
+├── SparkHDFSPreprocess.scala    # Spark preprocessing & feature engineering
+├── SparkMLModels.scala          # ML training (RF, GBT, LR) + Kafka producer
+├── StreamPredictions.scala      # CSV → Kafka streaming bridge
+├── MongoDBSink.scala            # Kafka consumer → MongoDB writer
+├── ForexKafkaProducer.scala     # Live forex feed Kafka producer
+├── SparkKafkaStreaming.scala     # Spark Structured Streaming consumer
+├── SparkUIDemo.scala            # Spark UI visualization demo
+├── presentation.html            # Project presentation (GitHub Pages)
+├── raw2/                        # Local raw data files (15 pairs × 3 timeframes)
+├── spark_output/                # Spark processed files
+├── ml_output/                   # ML prediction CSVs
+├── run.ps1                      # Windows execution script
+├── run.sh                       # Linux/Mac execution script
+└── README.md                    # Project documentation
 ```
 
 ## Installation
@@ -112,6 +143,31 @@ The project uses the following Spark dependencies:
 ```bash
 scala-cli run --java-opt "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED" SparkHDFSPreprocess.scala
 ```
+
+### Running ML Models
+```bash
+scala-cli run SparkMLModels.scala
+```
+Trains RF, GBT, LR models on preprocessed data, evaluates metrics, outputs predictions to `ml_output/`, and streams results to Kafka.
+
+### Streaming Predictions to Kafka
+```bash
+# Start Kafka (KRaft mode)
+kafka-server-start.bat C:\kafka\config\kraft\server.properties
+
+# Create topic
+kafka-topics.bat --create --topic forex-predictions --partitions 3 --bootstrap-server localhost:9092
+
+# Stream ML output CSVs to Kafka
+scala-cli run StreamPredictions.scala
+```
+
+### MongoDB Ingestion
+```bash
+# Consume from Kafka and insert into MongoDB
+scala-cli run MongoDBSink.scala
+```
+Reads from `forex-predictions` topic and inserts into `forex_db` collections: `rf_predictions`, `gbt_predictions`, `lr_signals`.
 
 ### Configuration
 
@@ -243,7 +299,11 @@ This project is part of academic coursework for Big Data Analytics.
 
 ## Contributors
 
-- Naveen - Big Data Analytics, Semester 6
+**Team 15 — Big Data Analytics, Semester 6**
+- Naveen Babu M S (CB.SC.U4AIE23153)
+- Kishore B (CB.SC.U4AIE23139)
+- M Koushal Reddy (CB.SC.U4AIE23145)
+- Sai Charan (CB.SC.U4AIE23143)
 
 ## Acknowledgments
 
