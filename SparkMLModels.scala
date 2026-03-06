@@ -42,6 +42,8 @@ object SparkMLModels {
       .config("spark.driver.memory", "8g")
       .config("spark.sql.adaptive.enabled", "true")
       .config("spark.sql.shuffle.partitions", "8")
+      .config("spark.eventLog.enabled", "true")
+      .config("spark.eventLog.dir", "file:///D:/tmp/spark-events")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
@@ -108,10 +110,9 @@ object SparkMLModels {
       .withColumn("Change_lag2",  lag("Change", 2).over(w))
       .withColumn("MA5_MA20_Ratio", col("MA5") / col("MA20"))
 
-    // Create 24 target columns: Close_h1 ... Close_h24
-    for (h <- 1 to HORIZON) {
-      featureDF = featureDF.withColumn(s"Close_h$h", lead("Close", h).over(w))
-    }
+    // Create h+1 target (recursive approach: one model predicts next hour,
+    // same model is reused with recalculated features to forecast t+2, t+3, ... t+24)
+    featureDF = featureDF.withColumn("Close_h1", lead("Close", 1).over(w))
 
     // Classification label: price direction at +24h
     featureDF = featureDF
@@ -152,118 +153,76 @@ object SparkMLModels {
       .setWithMean(true)
 
     // -----------------------------------------------------------------------
-    // 5. RANDOM FOREST — 24-hour ahead prediction (one model per hour)
+    // 5. RANDOM FOREST — h+1 model (Recursive Forecasting Approach)
+    //    One model predicts t+1, recalculates features, predicts t+2, etc.
+    //    The 24-step recursive loop runs in SparkKafkaStreaming.scala
     // -----------------------------------------------------------------------
     println("\n" + "=" * 70)
-    println("RANDOM FOREST REGRESSOR — NEXT 24 HOURS (h+1 to h+24)")
+    println("RANDOM FOREST REGRESSOR — h+1 (Recursive Approach)")
     println("=" * 70)
+    println("Training a single h+1 model. SparkKafkaStreaming uses it recursively")
+    println("to predict t+1, recalculate features, then predict t+2, ... t+24.\n")
 
     val regEvaluator = new RegressionEvaluator()
       .setPredictionCol("prediction")
 
-    case class HourlyResult(hour: Int, rmse: Double, mae: Double, r2: Double)
-    val rfResults = scala.collection.mutable.ArrayBuffer.empty[HourlyResult]
+    val rf = new RandomForestRegressor()
+      .setLabelCol("Close_h1")
+      .setFeaturesCol("features")
+      .setNumTrees(50)
+      .setMaxDepth(8)
+      .setMinInstancesPerNode(10)
+      .setSeed(42)
 
-    // Store all per-hour predictions for CSV output
-    var rfAllPredictions: DataFrame = null
+    val rfPipeline = new Pipeline().setStages(Array(assembler, scaler, rf))
+    println("  Training RF h+1 model...")
+    val rfH1Model = rfPipeline.fit(trainDF)
+    val rfPreds   = rfH1Model.transform(testDF)
 
-    for (h <- 1 to HORIZON) {
-      val labelCol = s"Close_h$h"
+    val rfRmse = regEvaluator.setLabelCol("Close_h1").setMetricName("rmse").evaluate(rfPreds)
+    val rfMae  = regEvaluator.setLabelCol("Close_h1").setMetricName("mae").evaluate(rfPreds)
+    val rfR2   = regEvaluator.setLabelCol("Close_h1").setMetricName("r2").evaluate(rfPreds)
 
-      val rf = new RandomForestRegressor()
-        .setLabelCol(labelCol)
-        .setFeaturesCol("features")
-        .setNumTrees(50)
-        .setMaxDepth(8)
-        .setMinInstancesPerNode(10)
-        .setSeed(42)
+    println(f"  h+1  |  RMSE: $rfRmse%10.6f  |  MAE: $rfMae%10.6f  |  R²: $rfR2%.6f")
 
-      val pipeline = new Pipeline().setStages(Array(assembler, scaler, rf))
-      val model    = pipeline.fit(trainDF)
-      val preds    = model.transform(testDF)
+    // Save the h+1 RF PipelineModel for recursive streaming pipeline
+    val modelSavePath = "ml_output/rf_h1_model"
+    rfH1Model.write.overwrite().save(modelSavePath)
+    println(s"\n  Saved RF h+1 PipelineModel to: $modelSavePath")
+    println("  (Loaded by SparkKafkaStreaming.scala for recursive 24-step prediction)")
 
-      val rmse = regEvaluator.setLabelCol(labelCol).setMetricName("rmse").evaluate(preds)
-      val mae  = regEvaluator.setLabelCol(labelCol).setMetricName("mae").evaluate(preds)
-      val r2   = regEvaluator.setLabelCol(labelCol).setMetricName("r2").evaluate(preds)
-
-      rfResults += HourlyResult(h, rmse, mae, r2)
-      println(f"  h+$h%2d  |  RMSE: $rmse%10.6f  |  MAE: $mae%10.6f  |  R²: $r2%.6f")
-
-      // Collect last-hour predictions for CSV output (save only h1,h6,h12,h24 for efficiency)
-      if (h == 1 || h == 6 || h == 12 || h == 24) {
-        val hourPreds = preds
-          .select(col("Date"), col("Pair"), col("Close"), col(labelCol).as(s"Actual_h$h"), col("prediction").as(s"RF_h$h"))
-        if (rfAllPredictions == null) {
-          rfAllPredictions = hourPreds
-        } else {
-          rfAllPredictions = rfAllPredictions
-            .join(hourPreds.select("Date", "Pair", s"Actual_h$h", s"RF_h$h"), Seq("Date", "Pair"), "inner")
-        }
-      }
-    }
-
-    // Feature importances from h+1 model (representative)
-    val rfH1Model = {
-      val rf1 = new RandomForestRegressor().setLabelCol("Close_h1").setFeaturesCol("features")
-        .setNumTrees(50).setMaxDepth(8).setMinInstancesPerNode(10).setSeed(42)
-      new Pipeline().setStages(Array(assembler, scaler, rf1)).fit(trainDF)
-    }
     val rfModelStage = rfH1Model.stages.last.asInstanceOf[RandomForestRegressionModel]
-    println("\n  Top 5 Features (from h+1 model):")
+    println("\n  Top 5 Features:")
     rfModelStage.featureImportances.toArray.zip(FEATURE_COLS).sortBy(-_._1).take(5)
       .zipWithIndex.foreach { case ((imp, name), i) =>
         println(f"    ${i+1}. $name%-20s : ${imp * 100}%.2f%%")
       }
 
-    val rfAvgR2 = rfResults.map(_.r2).sum / rfResults.size
-    println(f"\n  Average R² across 24 hours: $rfAvgR2%.6f")
-
     // -----------------------------------------------------------------------
-    // 6. GBT — 24-hour ahead prediction
+    // 6. GBT — h+1 model (Recursive Forecasting Approach)
     // -----------------------------------------------------------------------
     println("\n" + "=" * 70)
-    println("GRADIENT BOOSTED TREES — NEXT 24 HOURS (h+1 to h+24)")
+    println("GRADIENT BOOSTED TREES — h+1 (Recursive Approach)")
     println("=" * 70)
 
-    val gbtResults = scala.collection.mutable.ArrayBuffer.empty[HourlyResult]
-    var gbtAllPredictions: DataFrame = null
+    val gbt = new GBTRegressor()
+      .setLabelCol("Close_h1")
+      .setFeaturesCol("features")
+      .setMaxIter(50)
+      .setMaxDepth(5)
+      .setStepSize(0.05)
+      .setSeed(42)
 
-    for (h <- 1 to HORIZON) {
-      val labelCol = s"Close_h$h"
+    val gbtPipeline = new Pipeline().setStages(Array(assembler, scaler, gbt))
+    println("  Training GBT h+1 model...")
+    val gbtH1Model = gbtPipeline.fit(trainDF)
+    val gbtPreds   = gbtH1Model.transform(testDF)
 
-      val gbt = new GBTRegressor()
-        .setLabelCol(labelCol)
-        .setFeaturesCol("features")
-        .setMaxIter(50)
-        .setMaxDepth(5)
-        .setStepSize(0.05)
-        .setSeed(42)
+    val gbtRmse = regEvaluator.setLabelCol("Close_h1").setMetricName("rmse").evaluate(gbtPreds)
+    val gbtMae  = regEvaluator.setLabelCol("Close_h1").setMetricName("mae").evaluate(gbtPreds)
+    val gbtR2   = regEvaluator.setLabelCol("Close_h1").setMetricName("r2").evaluate(gbtPreds)
 
-      val pipeline = new Pipeline().setStages(Array(assembler, scaler, gbt))
-      val model    = pipeline.fit(trainDF)
-      val preds    = model.transform(testDF)
-
-      val rmse = regEvaluator.setLabelCol(labelCol).setMetricName("rmse").evaluate(preds)
-      val mae  = regEvaluator.setLabelCol(labelCol).setMetricName("mae").evaluate(preds)
-      val r2   = regEvaluator.setLabelCol(labelCol).setMetricName("r2").evaluate(preds)
-
-      gbtResults += HourlyResult(h, rmse, mae, r2)
-      println(f"  h+$h%2d  |  RMSE: $rmse%10.6f  |  MAE: $mae%10.6f  |  R²: $r2%.6f")
-
-      if (h == 1 || h == 6 || h == 12 || h == 24) {
-        val hourPreds = preds
-          .select(col("Date"), col("Pair"), col("Close"), col(labelCol).as(s"Actual_h$h"), col("prediction").as(s"GBT_h$h"))
-        if (gbtAllPredictions == null) {
-          gbtAllPredictions = hourPreds
-        } else {
-          gbtAllPredictions = gbtAllPredictions
-            .join(hourPreds.select("Date", "Pair", s"Actual_h$h", s"GBT_h$h"), Seq("Date", "Pair"), "inner")
-        }
-      }
-    }
-
-    val gbtAvgR2 = gbtResults.map(_.r2).sum / gbtResults.size
-    println(f"\n  Average R² across 24 hours: $gbtAvgR2%.6f")
+    println(f"  h+1  |  RMSE: $gbtRmse%10.6f  |  MAE: $gbtMae%10.6f  |  R²: $gbtR2%.6f")
 
     // -----------------------------------------------------------------------
     // 7. Logistic Regression — 24h direction classification
@@ -328,51 +287,42 @@ object SparkMLModels {
     // 8. Model Comparison Summary
     // -----------------------------------------------------------------------
     println("\n" + "=" * 70)
-    println("MODEL COMPARISON SUMMARY — 24-HOUR PREDICTION")
+    println("MODEL COMPARISON SUMMARY — h+1 RECURSIVE PREDICTION")
     println("=" * 70)
 
-    println("\nRandom Forest — per-hour R²:")
-    println(f"  ${"Hour"}%-8s ${"RMSE"}%-12s ${"MAE"}%-12s ${"R²"}%-10s")
-    println("  " + "-" * 45)
-    rfResults.foreach { r =>
-      println(f"  h+${r.hour}%-5d ${r.rmse}%-12.6f ${r.mae}%-12.6f ${r.r2}%-10.6f")
-    }
-    println(f"  Average R²: $rfAvgR2%.6f")
-
-    println("\nGradient Boosted Trees — per-hour R²:")
-    println(f"  ${"Hour"}%-8s ${"RMSE"}%-12s ${"MAE"}%-12s ${"R²"}%-10s")
-    println("  " + "-" * 45)
-    gbtResults.foreach { r =>
-      println(f"  h+${r.hour}%-5d ${r.rmse}%-12.6f ${r.mae}%-12.6f ${r.r2}%-10.6f")
-    }
-    println(f"  Average R²: $gbtAvgR2%.6f")
+    println(f"\nRandom Forest h+1:        RMSE: $rfRmse%.6f  |  MAE: $rfMae%.6f  |  R²: $rfR2%.6f")
+    println(f"Gradient Boosted Trees h+1: RMSE: $gbtRmse%.6f  |  MAE: $gbtMae%.6f  |  R²: $gbtR2%.6f")
 
     println("\nClassification (24h direction):")
     println(f"  AUC-ROC: $lrAUC%.4f  |  Accuracy: ${lrAccuracy * 100}%.2f%%  |  F1: $lrF1%.4f")
 
-    val bestRegressor = if (rfAvgR2 >= gbtAvgR2) "Random Forest" else "Gradient Boosted Trees"
-    println(s"\n  Best Regressor (by avg R²): $bestRegressor")
+    val bestRegressor = if (rfR2 >= gbtR2) "Random Forest" else "Gradient Boosted Trees"
+    println(s"\n  Best Regressor (by R²): $bestRegressor")
+    println("  Note: h+1 model is used recursively by SparkKafkaStreaming for 24-step prediction.")
 
     // -----------------------------------------------------------------------
-    // 9. Save predictions to CSV
+    // 9. Save h+1 predictions to CSV
     // -----------------------------------------------------------------------
-    println("\nSaving 24h predictions to ml_output/...")
+    println("\nSaving h+1 predictions to ml_output/...")
     new java.io.File("ml_output").mkdirs()
 
-    // RF 24h predictions — save via collect + PrintWriter (key horizons: h1,h6,h12,h24)
-    val rfSaveHours = Seq(1, 6, 12, 24)
-    val rfCols = Seq("Date", "Pair", "Close") ++ rfSaveHours.flatMap(h => Seq(s"Actual_h$h", s"RF_h$h"))
-    val rfOut = rfAllPredictions.select(rfCols.head, rfCols.tail: _*).collect()
-    val rfWriter = new java.io.PrintWriter("ml_output/rf_24h_predictions.csv")
-    rfWriter.println(rfCols.mkString(","))
+    // RF h+1 predictions
+    val rfSaveDF = rfPreds
+      .select(col("Date"), col("Pair"), col("Close"), col("Close_h1").as("Actual_h1"), col("prediction").as("RF_Predicted"))
+      .orderBy("Date", "Pair")
+    val rfOut = rfSaveDF.collect()
+    val rfWriter = new java.io.PrintWriter("ml_output/rf_predictions.csv")
+    rfWriter.println("Date,Pair,Close,Actual_h1,RF_Predicted")
     rfOut.foreach(r => rfWriter.println(r.mkString(",")))
     rfWriter.close()
 
-    // GBT 24h predictions
-    val gbtCols = Seq("Date", "Pair", "Close") ++ rfSaveHours.flatMap(h => Seq(s"Actual_h$h", s"GBT_h$h"))
-    val gbtOut = gbtAllPredictions.select(gbtCols.head, gbtCols.tail: _*).collect()
-    val gbtWriter = new java.io.PrintWriter("ml_output/gbt_24h_predictions.csv")
-    gbtWriter.println(gbtCols.mkString(","))
+    // GBT h+1 predictions
+    val gbtSaveDF = gbtPreds
+      .select(col("Date"), col("Pair"), col("Close"), col("Close_h1").as("Actual_h1"), col("prediction").as("GBT_Predicted"))
+      .orderBy("Date", "Pair")
+    val gbtOut = gbtSaveDF.collect()
+    val gbtWriter = new java.io.PrintWriter("ml_output/gbt_predictions.csv")
+    gbtWriter.println("Date,Pair,Close,Actual_h1,GBT_Predicted")
     gbtOut.foreach(r => gbtWriter.println(r.mkString(",")))
     gbtWriter.close()
 
@@ -383,21 +333,21 @@ object SparkMLModels {
       .withColumn("Actual", when(col("PriceDirection") === 1.0, "UP").otherwise("DOWN"))
       .drop("PriceDirection", "prediction")
       .collect()
-    val lrWriter = new java.io.PrintWriter("ml_output/lr_24h_signals.csv")
+    val lrWriter = new java.io.PrintWriter("ml_output/lr_signals.csv")
     lrWriter.println("Date,Pair,Close,Actual,Signal")
     lrOut.foreach(r => lrWriter.println(r.mkString(",")))
     lrWriter.close()
 
     println("Saved:")
-    println("  ml_output/rf_24h_predictions.csv  (24 hourly RF predictions)")
-    println("  ml_output/gbt_24h_predictions.csv (24 hourly GBT predictions)")
-    println("  ml_output/lr_24h_signals.csv      (24h direction signals)")
+    println("  ml_output/rf_predictions.csv   (h+1 RF predictions)")
+    println("  ml_output/gbt_predictions.csv  (h+1 GBT predictions)")
+    println("  ml_output/lr_signals.csv       (24h direction signals)")
 
     // -----------------------------------------------------------------------
-    // 10. Stream predictions to Kafka topic "forex-predictions"
+    // 10. Stream h+1 predictions to Kafka topic "forex-predictions"
     // -----------------------------------------------------------------------
     println("\n" + "=" * 70)
-    println("STREAMING PREDICTIONS TO KAFKA (topic: forex-predictions)")
+    println("STREAMING h+1 PREDICTIONS TO KAFKA (topic: forex-predictions)")
     println("=" * 70)
 
     val kafkaProps = new java.util.Properties()
@@ -413,51 +363,46 @@ object SparkMLModels {
     val predTopic = "forex-predictions"
     var streamedCount = 0
 
-    // Stream RF predictions
-    println("  Streaming RF 24h predictions...")
+    // Stream RF h+1 predictions
+    println("  Streaming RF h+1 predictions...")
     rfOut.foreach { row =>
-      val jsonParts = rfCols.zip(row.toSeq).map { case (k, v) =>
-        s""""$k":"$v""""
-      }
-      val json = s"""{"model":"RandomForest",${jsonParts.mkString(",")}}"""
+      val json = s"""  {"model":"RandomForest","Date":"${row.get(0)}","Pair":"${row.get(1)}","Close":"${row.get(2)}","Actual_h1":"${row.get(3)}","RF_Predicted":"${row.get(4)}"}"""
       val record = new ProducerRecord[String, String](predTopic, row.getString(1), json)
       kafkaProducer.send(record)
       streamedCount += 1
     }
-    println(s"    Sent $streamedCount RF prediction records")
+    println(s"    Sent $streamedCount RF records")
 
-    // Stream GBT predictions
+    // Stream GBT h+1 predictions
     val gbtStreamStart = streamedCount
-    println("  Streaming GBT 24h predictions...")
+    println("  Streaming GBT h+1 predictions...")
     gbtOut.foreach { row =>
-      val jsonParts = gbtCols.zip(row.toSeq).map { case (k, v) =>
-        s""""$k":"$v""""
-      }
-      val json = s"""{"model":"GradientBoostedTrees",${jsonParts.mkString(",")}}"""
+      val json = s"""  {"model":"GradientBoostedTrees","Date":"${row.get(0)}","Pair":"${row.get(1)}","Close":"${row.get(2)}","Actual_h1":"${row.get(3)}","GBT_Predicted":"${row.get(4)}"}"""
       val record = new ProducerRecord[String, String](predTopic, row.getString(1), json)
       kafkaProducer.send(record)
       streamedCount += 1
     }
-    println(s"    Sent ${streamedCount - gbtStreamStart} GBT prediction records")
+    println(s"    Sent ${streamedCount - gbtStreamStart} GBT records")
 
     // Stream LR signals
     val lrStreamStart = streamedCount
     println("  Streaming LR direction signals...")
     lrOut.foreach { row =>
-      val json = s"""{"model":"LogisticRegression","Date":"${row.get(0)}","Pair":"${row.get(1)}","Close":"${row.get(2)}","Actual":"${row.get(3)}","Signal":"${row.get(4)}"}"""
+      val json = s"""  {"model":"LogisticRegression","Date":"${row.get(0)}","Pair":"${row.get(1)}","Close":"${row.get(2)}","Actual":"${row.get(3)}","Signal":"${row.get(4)}"}"""
       val record = new ProducerRecord[String, String](predTopic, row.getString(1), json)
       kafkaProducer.send(record)
       streamedCount += 1
     }
-    println(s"    Sent ${streamedCount - lrStreamStart} LR signal records")
+    println(s"    Sent ${streamedCount - lrStreamStart} LR records")
 
     kafkaProducer.flush()
     kafkaProducer.close()
     println(s"\n  Total records streamed to Kafka: $streamedCount")
 
     println("\n" + "=" * 70)
-    println("SPARK ML — 24-HOUR PREDICTION COMPLETE")
+    println("SPARK ML — h+1 RECURSIVE MODEL TRAINING COMPLETE")
     println("=" * 70)
+    println("Next step: Run SparkKafkaStreaming.scala to perform 24-step recursive prediction.")
 
     spark.stop()
   }
