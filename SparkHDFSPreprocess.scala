@@ -20,6 +20,8 @@ object SparkHDFSPreprocess {
       .master("local[*]")
       .config("spark.driver.memory", "4g")
       .config("spark.sql.adaptive.enabled", "true")
+      .config("spark.eventLog.enabled", "true")
+      .config("spark.eventLog.dir", "file:///D:/tmp/spark-events")
       .getOrCreate()
     
     spark.sparkContext.setLogLevel("WARN")
